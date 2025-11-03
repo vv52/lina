@@ -1,6 +1,5 @@
-import std/[os, osproc, dirs, tables]
-import std/[strtabs, strutils, strformat]
-import std/[math, streams]
+import std/[os, osproc, streams, unicode]
+import std/[strutils, strtabs, tables]
 import illwill, scan, todo
 
 type
@@ -18,21 +17,28 @@ const
 
 var
   issueBuffer = initTable[string, seq[Issue]]()
+  fileIssues = initTable[int, (int, int)]() # [issueIndex, (terminalLine, fileLine)]
   files : seq[string]
   config = newStringTable()
   line = 3
   fileIndex = 1
   selection = 1
+  issueSelection = 1
   current : string
 
 proc close() {.noconv.} =
   illwillDeinit()
   showCursor()
   quit(0)
- 
-illwillInit(fullscreen=true)
-setControlCHook(close)
-hideCursor()
+
+proc closeNoQuit() {.noconv.} =
+  illwillDeinit()
+  showCursor()
+
+proc initProgram =
+  illwillInit(fullscreen=true)
+  setControlCHook(close)
+  hideCursor()
 
 var tb = newTerminalBuffer(terminalWidth(), terminalHeight())
 
@@ -85,8 +91,11 @@ proc displayIssues(issues : seq[Issue], filename : string) : void =
   var
     line = yMargin
     issues = scan(filename)
+    count = 1
   for i in issues:
+    fileIssues[count] = (line, i.line)
     line = displayIssue(i, line, filename)
+    count+=1
   if line == yMargin:
     tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "[DONE] ", resetStyle, "Nothing to do")
     line+=2
@@ -108,15 +117,21 @@ proc fileSelect : void =
     fileIndex+=1
     line+=1
 
+proc displayCursor : void =
+  tb[xMargin-1, fileIssues[issueSelection][0]] = TerminalChar(ch: ">".runeAt(0), fg: fgGreen, bg: bgNone, style: {styleBright})
+
 proc fileView(filename : string) : void =
   if not issueBuffer.hasKey(filename):
     issueBuffer[filename] = scan(filename)
   displayIssues(issueBuffer[filename], filename)
+  displayCursor()
 
 proc main(filename : string) : void =
+  initProgram()
   loadConfig()
   loadFilesFromScanDir()
   while true:
+    tb.clear()
     case currentState:
     of FILE_SELECT:
       fileSelect()
@@ -130,41 +145,68 @@ proc main(filename : string) : void =
     case key
     of Key.None: discard
     of Key.Up, Key.K:
-      if selection == 1:
-        selection = files.len
-      else:
-        selection -= 1
+      case currentState:
+      of FILE_SELECT:
+        if selection == 1:
+          selection = files.len
+        else:
+          selection -= 1
+      of FILE_VIEW:
+        if issueSelection == 1:
+          issueSelection = fileIssues.len
+        else:
+          issueSelection -= 1
+      of ISSUE_VIEW:
+        discard
+      of DIRECT_VIEW:
+        discard
     of Key.Down, Key.J:
-      if selection == files.len:
-        selection = 1
-      else:
-        selection += 1
+      case currentState:
+      of FILE_SELECT:
+        if selection == files.len:
+          selection = 1
+        else:
+          selection += 1
+      of FILE_VIEW:
+        if issueSelection == fileIssues.len:
+          issueSelection = 1
+        else:
+          issueSelection += 1
+      of ISSUE_VIEW:
+        discard
+      of DIRECT_VIEW:
+        discard
     of Key.Enter:
       case currentState:
       of FILE_SELECT:
         currentState = FILE_VIEW
       of FILE_VIEW:
-        let p = startProcess("hx", args=[current], options=Opt)
+        let p = startProcess("hx", args=["+" & $fileIssues[issueSelection][1], current], options=Opt)
         discard p.waitForExit()
+        closeNoQuit()
         p.close()
+        initProgram()
         currentState = FILE_SELECT
-        # close()
-        # currentState = FILE_SELECT
+        todo("return to FILE_SELECT breaks stuff", "scanDir style resetting")
       of ISSUE_VIEW:
         discard
       of DIRECT_VIEW:
-        discard
+        let p = startProcess("hx", args=[current], options=Opt)
+        discard p.waitForExit()
+        closeNoQuit()
+        p.close()
+        quit(0)
     of Key.Escape, Key.Q: close()
     else:
       discard
     tb.display()
     sleep(20)
-    tb.clear()
 
 when isMainModule:
   let params = commandLineParams()
   if params.len == 1:
     currentState = DIRECT_VIEW
-    main(params[0])
+    current = params[0]
+    main(current)
   else:
     main("./test.nim")

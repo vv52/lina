@@ -1,5 +1,4 @@
 import std/[re, streams, strutils, sequtils, terminal]
-import todo
 
 type
   PRIORITY_LEVEL* = enum
@@ -46,9 +45,6 @@ proc printIssue(i : Issue, filename : string) : void =
       styledEcho fgCyan, border, styleBright, fgYellow, "[TODO] ", resetStyle, i.message
       styledEcho fgCyan, border, fgYellow, i.description
       styledEcho fgCyan, border, fgWhite, icon, styleUnderscore, fgCyan, filename, resetStyle, styleBright, fgCyan, ":", $i.line
-  else:
-    styledEcho fgRed, styleBright, "Issue error at: "
-    echo i
   styledEcho fgCyan, border
   
 proc scan*(filename : string) : seq[Issue]  =
