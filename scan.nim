@@ -55,6 +55,9 @@ proc scan*(filename : string) : seq[Issue]  =
   var
     fs = newFileStream(filename, fmRead)
     todoIssues, priorityIssues : seq[Issue]
+  line = ""
+  count = 0
+  i = 0
   if not isNil(fs):
     while fs.readLine(line):
       count += 1
