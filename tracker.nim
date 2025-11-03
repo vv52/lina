@@ -1,16 +1,20 @@
-import std/[os, dirs, tables]
+import std/[os, osproc, dirs, tables]
 import std/[strtabs, strutils, strformat]
 import std/[math, streams]
-import illwill, scan
+import illwill, scan, todo
 
 type
   STATE = enum
-    FILE_SELECT, FILE_VIEW, ISSUE_VIEW
+    FILE_SELECT, FILE_VIEW, ISSUE_VIEW, DIRECT_VIEW
 const
   xMargin = 3
   yMargin = 3
   borderXMargin = 0
   borderYMargin = 0
+  Opt: set[ProcessOption] = {
+    poUsePath,
+    poParentStreams
+  }
 
 var
   issueBuffer = initTable[string, seq[Issue]]()
@@ -35,6 +39,7 @@ var tb = newTerminalBuffer(terminalWidth(), terminalHeight())
 var currentState : STATE = FILE_SELECT
 
 proc loadConfig : void =
+  todo("Load file extensions picked up in scan from config.ini")
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -53,6 +58,7 @@ proc loadFilesFromScanDir =
       files.add(file)
 
 proc displayIssue(i : Issue, line : int, filename : string) : int =
+  todo("Implement wordwrap")
   case i.level:
   of PRIORITY:
     if i.description == "":
@@ -118,6 +124,8 @@ proc main(filename : string) : void =
       fileView(current)
     of ISSUE_VIEW:
       discard
+    of DIRECT_VIEW:
+      fileView(filename)
     var key = getKey()
     case key
     of Key.None: discard
@@ -132,10 +140,20 @@ proc main(filename : string) : void =
       else:
         selection += 1
     of Key.Enter:
-      if currentState == FILE_SELECT:
+      case currentState:
+      of FILE_SELECT:
         currentState = FILE_VIEW
-      else:
+      of FILE_VIEW:
+        let p = startProcess("hx", args=[current], options=Opt)
+        discard p.waitForExit()
+        p.close()
         currentState = FILE_SELECT
+        # close()
+        # currentState = FILE_SELECT
+      of ISSUE_VIEW:
+        discard
+      of DIRECT_VIEW:
+        discard
     of Key.Escape, Key.Q: close()
     else:
       discard
@@ -146,6 +164,7 @@ proc main(filename : string) : void =
 when isMainModule:
   let params = commandLineParams()
   if params.len == 1:
+    currentState = DIRECT_VIEW
     main(params[0])
   else:
     main("./test.nim")
