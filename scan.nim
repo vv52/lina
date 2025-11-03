@@ -1,14 +1,14 @@
-import std/[re, streams, strutils, terminal]
+import std/[re, streams, strutils, sequtils, terminal]
 import todo
 
 type
-  PRIORITY_LEVEL = enum
+  PRIORITY_LEVEL* = enum
     TODO, PRIORITY
-  Issue = object
-    line : int
-    message : string
-    description : string = ""
-    level : PRIORITY_LEVEL = TODO
+  Issue* = object
+    line* : int
+    message* : string
+    description* : string = ""
+    level* : PRIORITY_LEVEL = TODO
 
 const
   todoHead = 6
@@ -16,8 +16,8 @@ const
   priorityHead = 10
   priorityTail = 2
   descSep = """", """" 
-  icon = " \u21b3 \ueae9 "
-  border = "|| "
+  icon* = " \u21b3 \ueae9 "
+  border* = "|| "
 
 var
   todoPattern = re"todo\(.+\)"
@@ -27,11 +27,8 @@ var
   matches: array[1, string]
   todos, priorities : string
   contents : seq[string]
-  todoIssues, priorityIssues : seq[Issue]
-  # filename = "../todo/tests/test.nim"
-  filename = "./scan.nim"
 
-proc printIssue(i : Issue) : void =
+proc printIssue(i : Issue, filename : string) : void =
   case i.level:
   of PRIORITY:
     if i.description == "":
@@ -54,9 +51,10 @@ proc printIssue(i : Issue) : void =
     echo i
   styledEcho fgCyan, border
   
-proc scan*(filename : string) : void  =
+proc scan*(filename : string) : seq[Issue]  =
   var
     fs = newFileStream(filename, fmRead)
+    todoIssues, priorityIssues : seq[Issue]
   if not isNil(fs):
     while fs.readLine(line):
       count += 1
@@ -77,19 +75,20 @@ proc scan*(filename : string) : void  =
         else:
           todoIssues.add(Issue(line : count, message : contents[0], level : TODO))
     fs.close()
+  return concat(priorityIssues, todoIssues)
     
 proc printFileStatus(filename : string) : void =
   var length = terminalWidth() - 10 - filename.len
   var spacer = "_".repeat(length)
   styledEcho styleBright, fgCyan, "//_FILE_[", fgYellow, filename, fgCyan, "]", spacer
   styledEcho fgCyan, border
-  scan(filename)
-  for i in priorityIssues:
-    printIssue(i)
-  for i in todoIssues:
-    printIssue(i)
+  var issues = scan(filename)
+  for i in issues:
+    printIssue(i, filename)
+  if issues.len == 0:
+    styledEcho fgCyan, border, styleBright, fgGreen, "[DONE] ", resetStyle, "Nothing to do"
   length = terminalWidth() - 12
   spacer = "_".repeat(length)
   styledEcho styleBright, fgCyan, "\\\\_", spacer, "_TRACKER_"
 
-printFileStatus("../todo/tests/test.nim")
+# printFileStatus(filename)
