@@ -8,6 +8,7 @@ type
     message* : string
     description* : string = ""
     level* : PRIORITY_LEVEL = TODO
+    # todo("context*: seq[string]", "config-defined lines before/after todo")
 
 const
   todoHead = 6

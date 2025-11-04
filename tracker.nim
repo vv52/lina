@@ -2,6 +2,9 @@ import std/[os, osproc, streams, unicode]
 import std/[strutils, strtabs, tables]
 import illwill, scan, todo
 
+todo("simple ui mode", "no special unicode symbols")
+todo("FILE_RECENT c STATE", "alt home page for recent files")
+
 type
   STATE = enum
     FILE_SELECT, FILE_VIEW, ISSUE_VIEW, DIRECT_VIEW
@@ -47,9 +50,10 @@ proc initProgram =
   selection = 1
   issueSelection = 1
 
-
 proc loadConfig : void =
-  todo("Load file extensions picked up in scan from config.ini")
+  config["scanDir"] = getAppDir()
+  config["controls"] = "true"
+  config["extensions"] = ".nim,.py"
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -59,13 +63,12 @@ proc loadConfig : void =
       if line != "":
         option = line.split('=')
         config[option[0].strip] = option[1].strip
-  else:
-    config["scanDir"] = getAppDir()
 
 proc loadFilesFromScanDir =
   for file in walkDirRec(config["scanDir"], relative=true, checkDir=true):
-    if file.endsWith(".nim"):
-      files.add(file)
+    for extension in config["extensions"].split(","):
+      if file.endsWith(extension):
+        files.add(file)
 
 proc displayIssue(i : Issue, line : int, filename : string) : int =
   todo("Implement wordwrap")
@@ -96,6 +99,7 @@ proc displayIssues(issues : seq[Issue], filename : string) : void =
     line = yMargin
     issues = scan(filename)
     count = 1
+  fileIssues = initTable[int, (int, int)]() # [issueIndex, (terminalLine, fileLine)]
   for i in issues:
     fileIssues[count] = (line, i.line)
     line = displayIssue(i, line, filename)
@@ -107,23 +111,32 @@ proc displayIssues(issues : seq[Issue], filename : string) : void =
   tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line, doubleStyle=true)
   tb.write(0, 1, styleBright, fgCyan, "//[", fgYellow, filename, fgCyan, "]")
   tb.write(tb.width()-11, line, styleBright, fgCyan, "[TRACKER]")
-
+  
+proc displayControls(offset : int) =
+  if config["controls"] == "true":
+    tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+    tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
+    tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+    tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+  
 proc fileSelect : void =
   tb.write(xMargin, 1, styleBright, fgCyan, "Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
   line = 3
   fileIndex = 1
   for file in files:
     if fileIndex == selection:
-      tb.write(xMargin, line, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
+      tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
       current = config["scanDir"] & file
     else:
-      tb.write(xMargin, line, "  ", $fileIndex, ". ", file, resetStyle)
+      tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
     fileIndex+=1
     line+=1
-  tb.setForegroundColor(fgCyan)
-  tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line+1, doubleStyle=true)
-  tb.write(tb.width()-11, line+1, styleBright, fgCyan, "[TRACKER]")
-
+  # tb.setForegroundColor(fgCyan)
+  # tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line+1, doubleStyle=true)
+  # tb.write(0, 1, styleBright, fgCyan, "//[Scan Directory: ", fgYellow, config["scanDir"], fgCyan, "]", resetStyle)
+  # tb.write(tb.width()-11, line+1, styleBright, fgCyan, "[TRACKER]")
+  tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
+  displayControls(1)
 
 proc displayCursor : void =
   if fileIssues.len > 1:
@@ -134,6 +147,7 @@ proc fileView(filename : string) : void =
     issueBuffer[filename] = scan(filename)
   displayIssues(issueBuffer[filename], filename)
   displayCursor()
+  displayControls(4)
 
 proc main(filename : string) : void =
   initProgram()
@@ -185,9 +199,11 @@ proc main(filename : string) : void =
         discard
       of DIRECT_VIEW:
         discard
-    of Key.Enter:
+    of Key.Enter, Key.Space:
       case currentState:
       of FILE_SELECT:
+        # current = config["scanDir"] & files[selection]
+        issueSelection = 1
         currentState = FILE_VIEW
       of FILE_VIEW:
         let p = startProcess("hx", args=["+" & $fileIssues[issueSelection][1], current], options=Opt)
@@ -204,7 +220,15 @@ proc main(filename : string) : void =
         closeNoQuit()
         p.close()
         quit(0)
-    of Key.Escape, Key.Q: close()
+    of Key.Escape:
+      case currentState:
+      of FILE_SELECT, DIRECT_VIEW:
+        close()
+      of FILE_VIEW:
+        currentState = FILE_SELECT
+      of ISSUE_VIEW:
+        currentState = FILE_VIEW
+    of Key.Q: close()
     else:
       discard
     tb.display()
