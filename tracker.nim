@@ -16,6 +16,8 @@ const
   }
 
 var
+  tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+  currentState : STATE = FILE_SELECT
   issueBuffer = initTable[string, seq[Issue]]()
   fileIssues = initTable[int, (int, int)]() # [issueIndex, (terminalLine, fileLine)]
   files : seq[string]
@@ -39,10 +41,12 @@ proc initProgram =
   illwillInit(fullscreen=true)
   setControlCHook(close)
   hideCursor()
+  tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+  tb.clear()
+  fileIssues = initTable[int, (int, int)]()
+  selection = 1
+  issueSelection = 1
 
-var tb = newTerminalBuffer(terminalWidth(), terminalHeight())
-
-var currentState : STATE = FILE_SELECT
 
 proc loadConfig : void =
   todo("Load file extensions picked up in scan from config.ini")
@@ -116,9 +120,14 @@ proc fileSelect : void =
       tb.write(xMargin, line, "  ", $fileIndex, ". ", file, resetStyle)
     fileIndex+=1
     line+=1
+  tb.setForegroundColor(fgCyan)
+  tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line+1, doubleStyle=true)
+  tb.write(tb.width()-11, line+1, styleBright, fgCyan, "[TRACKER]")
+
 
 proc displayCursor : void =
-  tb[xMargin-1, fileIssues[issueSelection][0]] = TerminalChar(ch: ">".runeAt(0), fg: fgGreen, bg: bgNone, style: {styleBright})
+  if fileIssues.len > 1:
+    tb[xMargin-1, fileIssues[issueSelection][0]] = TerminalChar(ch: "⩺".runeAt(0), fg: fgGreen, bg: bgNone, style: {styleBright})
 
 proc fileView(filename : string) : void =
   if not issueBuffer.hasKey(filename):
@@ -187,7 +196,6 @@ proc main(filename : string) : void =
         p.close()
         initProgram()
         currentState = FILE_SELECT
-        todo("return to FILE_SELECT breaks stuff", "scanDir style resetting")
       of ISSUE_VIEW:
         discard
       of DIRECT_VIEW:
