@@ -52,6 +52,7 @@ proc initProgram =
 
 proc loadConfig : void =
   config["scanDir"] = getAppDir()
+  config["editor"] = "hx"
   config["controls"] = "true"
   config["extensions"] = ".nim,.py"
   if fileExists("./config.ini"):
@@ -94,7 +95,7 @@ proc displayIssue(i : Issue, line : int, filename : string) : int =
       tb.write(xMargin, line+2, resetStyle, fgCyan, " ", fgWhite, icon, styleUnderscore, fgCyan, filename, resetStyle, styleBright, fgCyan, ":", $i.line)
       result = line+4
 
-proc displayIssues(issues : seq[Issue], filename : string) : void =
+proc displayIssues(issues : seq[Issue], filename : string) : int =
   var
     line = yMargin
     issues = scan(filename)
@@ -111,8 +112,9 @@ proc displayIssues(issues : seq[Issue], filename : string) : void =
   tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line, doubleStyle=true)
   tb.write(0, 1, styleBright, fgCyan, "//[", fgYellow, filename, fgCyan, "]")
   tb.write(tb.width()-11, line, styleBright, fgCyan, "[TRACKER]")
+  return line
   
-proc displayControls(offset : int) =
+proc displayControls(offset : int = 0) =
   if config["controls"] == "true":
     tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
     tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
@@ -145,9 +147,9 @@ proc displayCursor : void =
 proc fileView(filename : string) : void =
   if not issueBuffer.hasKey(filename):
     issueBuffer[filename] = scan(filename)
-  displayIssues(issueBuffer[filename], filename)
+  line = displayIssues(issueBuffer[filename], filename)
   displayCursor()
-  displayControls(4)
+  displayControls(2)
 
 proc main(filename : string) : void =
   initProgram()
@@ -202,14 +204,19 @@ proc main(filename : string) : void =
     of Key.Enter, Key.Space:
       case currentState:
       of FILE_SELECT:
-        # current = config["scanDir"] & files[selection]
         issueSelection = 1
         currentState = FILE_VIEW
       of FILE_VIEW:
-        let p = startProcess("hx", args=["+" & $fileIssues[issueSelection][1], current], options=Opt)
-        discard p.waitForExit()
-        closeNoQuit()
-        p.close()
+        if fileIssues.len == 0:
+          let p = startProcess(config["editor"], args=[current], options=Opt)
+          discard p.waitForExit()
+          closeNoQuit()
+          p.close()
+        else:
+          let p = startProcess(config["editor"], args=["+" & $fileIssues[issueSelection][1], current], options=Opt)
+          discard p.waitForExit()
+          closeNoQuit()
+          p.close()
         initProgram()
         currentState = FILE_SELECT
       of ISSUE_VIEW:
