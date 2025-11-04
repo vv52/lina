@@ -116,10 +116,22 @@ proc displayIssues(issues : seq[Issue], filename : string) : int =
   
 proc displayControls(offset : int = 0) =
   if config["controls"] == "true":
-    tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
-    tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
-    tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
-    tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    case currentState:
+    of FILE_SELECT:
+      tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+      tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
+      tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+      tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    of FILE_VIEW:
+      tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+      tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
+      tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+      tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    of ISSUE_VIEW:
+      discard
+    of DIRECT_VIEW:
+      discard
+      
   
 proc fileSelect : void =
   tb.write(xMargin, 1, styleBright, fgCyan, "Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
@@ -201,6 +213,38 @@ proc main(filename : string) : void =
         discard
       of DIRECT_VIEW:
         discard
+    of Key.Left, Key.H:
+      case currentState:
+      of FILE_SELECT:
+        discard
+      of FILE_VIEW:
+        if selection == 1:
+          selection = files.len
+        else:
+          selection -= 1
+        issueSelection = 1
+        currentState = FILE_VIEW
+        current = config["scanDir"] & files[selection-1]
+      of ISSUE_VIEW:
+        discard
+      of DIRECT_VIEW:
+        discard
+    of Key.Right, Key.L:
+      case currentState:
+      of FILE_SELECT:
+        discard
+      of FILE_VIEW:
+        if selection == files.len:
+          selection = 1
+        else:
+          selection += 1
+        issueSelection = 1
+        currentState = FILE_VIEW
+        current = config["scanDir"] & files[selection-1]
+      of ISSUE_VIEW:
+        discard
+      of DIRECT_VIEW:
+        discard
     of Key.Enter, Key.Space:
       case currentState:
       of FILE_SELECT:
@@ -218,6 +262,7 @@ proc main(filename : string) : void =
           closeNoQuit()
           p.close()
         initProgram()
+        todo("return to FILE_VIEW and reload after goto", "if not, maintain selection in FILE_SELECT")
         currentState = FILE_SELECT
       of ISSUE_VIEW:
         discard
@@ -248,4 +293,4 @@ when isMainModule:
     current = params[0]
     main(current)
   else:
-    main("./test.nim")
+    main("")
