@@ -145,10 +145,6 @@ proc fileSelect : void =
       tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
     fileIndex+=1
     line+=1
-  # tb.setForegroundColor(fgCyan)
-  # tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line+1, doubleStyle=true)
-  # tb.write(0, 1, styleBright, fgCyan, "//[Scan Directory: ", fgYellow, config["scanDir"], fgCyan, "]", resetStyle)
-  # tb.write(tb.width()-11, line+1, styleBright, fgCyan, "[TRACKER]")
   tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
   displayControls(1)
 
@@ -164,60 +160,45 @@ proc fileView(filename : string) : void =
   displayControls(2)
 
 proc main(filename : string) : void =
-  initProgram()
-  loadConfig()
-  loadFilesFromScanDir()
   while true:
     tb.clear()
+    var key = getKey()
     case currentState:
     of FILE_SELECT:
       fileSelect()
-    of FILE_VIEW:
-      fileView(current)
-    of ISSUE_VIEW:
-      discard
-    of DIRECT_VIEW:
-      fileView(filename)
-    var key = getKey()
-    case key
-    of Key.None: discard
-    of Key.Up, Key.K:
-      case currentState:
-      of FILE_SELECT:
+      case key
+      of Key.None: discard
+      of Key.Up, Key.K:
         if selection == 1:
           selection = files.len
         else:
           selection -= 1
-      of FILE_VIEW:
+      of Key.Down, Key.J:
+        if selection == files.len:
+          selection = 1
+        else:
+          selection += 1
+      of Key.Enter, Key.Space:
+        issueSelection = 1
+        currentState = FILE_VIEW
+      of Key.Escape, Key.Q: close()
+      else:
+        discard
+    of FILE_VIEW:
+      fileView(current)
+      case key
+      of Key.None: discard
+      of Key.Up, Key.K:
         if issueSelection == 1:
           issueSelection = fileIssues.len
         else:
           issueSelection -= 1
-      of ISSUE_VIEW:
-        discard
-      of DIRECT_VIEW:
-        discard
-    of Key.Down, Key.J:
-      case currentState:
-      of FILE_SELECT:
-        if selection == files.len:
-          selection = 1
-        else:
-          selection += 1
-      of FILE_VIEW:
+      of Key.Down, Key.J:
         if issueSelection == fileIssues.len:
           issueSelection = 1
         else:
           issueSelection += 1
-      of ISSUE_VIEW:
-        discard
-      of DIRECT_VIEW:
-        discard
-    of Key.Left, Key.H:
-      case currentState:
-      of FILE_SELECT:
-        discard
-      of FILE_VIEW:
+      of Key.Left, Key.H:
         if selection == 1:
           selection = files.len
         else:
@@ -225,15 +206,7 @@ proc main(filename : string) : void =
         issueSelection = 1
         currentState = FILE_VIEW
         current = config["scanDir"] & files[selection-1]
-      of ISSUE_VIEW:
-        discard
-      of DIRECT_VIEW:
-        discard
-    of Key.Right, Key.L:
-      case currentState:
-      of FILE_SELECT:
-        discard
-      of FILE_VIEW:
+      of Key.Right, Key.L:
         if selection == files.len:
           selection = 1
         else:
@@ -241,16 +214,7 @@ proc main(filename : string) : void =
         issueSelection = 1
         currentState = FILE_VIEW
         current = config["scanDir"] & files[selection-1]
-      of ISSUE_VIEW:
-        discard
-      of DIRECT_VIEW:
-        discard
-    of Key.Enter, Key.Space:
-      case currentState:
-      of FILE_SELECT:
-        issueSelection = 1
-        currentState = FILE_VIEW
-      of FILE_VIEW:
+      of Key.Enter, Key.Space:
         if fileIssues.len == 0:
           let p = startProcess(config["editor"], args=[current], options=Opt)
           discard p.waitForExit()
@@ -264,29 +228,22 @@ proc main(filename : string) : void =
         initProgram()
         todo("return to FILE_VIEW and reload after goto", "if not, maintain selection in FILE_SELECT")
         currentState = FILE_SELECT
-      of ISSUE_VIEW:
-        discard
-      of DIRECT_VIEW:
-        let p = startProcess("hx", args=[current], options=Opt)
-        discard p.waitForExit()
-        closeNoQuit()
-        p.close()
-        quit(0)
-    of Key.Escape:
-      case currentState:
-      of FILE_SELECT, DIRECT_VIEW:
-        close()
-      of FILE_VIEW:
+      of Key.Escape:
         currentState = FILE_SELECT
-      of ISSUE_VIEW:
-        currentState = FILE_VIEW
-    of Key.Q: close()
-    else:
+      of Key.Q: close()
+      else:
+        discard
+    of ISSUE_VIEW:
       discard
+    of DIRECT_VIEW:
+      fileView(filename)
     tb.display()
     sleep(20)
 
 when isMainModule:
+  initProgram()
+  loadConfig()
+  loadFilesFromScanDir()
   let params = commandLineParams()
   if params.len == 1:
     currentState = DIRECT_VIEW
