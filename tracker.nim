@@ -1,9 +1,10 @@
 import std/[os, osproc, streams, unicode]
-import std/[strutils, strtabs, tables]
+import std/[strutils, sequtils, strtabs, tables]
 import illwill, scan, todo
 
 todo("simple ui mode", "no special unicode symbols")
-todo("FILE_RECENT c STATE", "alt home page for recent files")
+todo("FILE_RECENT c STATE", "fileRecent works, need implement STATE")
+todo("FILE_EXPLORE", "expand FILE_SELECT into dired territory")
 
 type
   STATE = enum
@@ -23,13 +24,15 @@ var
   currentState : STATE = FILE_SELECT
   issueBuffer = initTable[string, seq[Issue]]()
   fileIssues = initTable[int, (int, int)]() # [issueIndex, (terminalLine, fileLine)]
-  files : seq[string]
+  files, recentFiles : seq[string]
   config = newStringTable()
   line = 3
   fileIndex = 1
   selection = 1
   issueSelection = 1
   current : string
+  flash = 32
+  historyFile = "history.txt"
 
 proc close() {.noconv.} =
   illwillDeinit()
@@ -55,6 +58,9 @@ proc loadConfig : void =
   config["editor"] = "hx"
   config["controls"] = "true"
   config["extensions"] = ".nim,.py"
+  config["arrow"] = "false"
+  config["flash"] = "false"
+  config["history"] = "10"
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -64,6 +70,8 @@ proc loadConfig : void =
       if line != "":
         option = line.split('=')
         config[option[0].strip] = option[1].strip
+  if not fileExists(historyFile):
+    writeFile(historyFile, "")
 
 proc loadFilesFromScanDir =
   for file in walkDirRec(config["scanDir"], relative=true, checkDir=true):
@@ -132,6 +140,18 @@ proc displayControls(offset : int = 0) =
     of DIRECT_VIEW:
       discard
       
+proc displayArrows =
+  if config["arrow"] == "true":
+    case config["flash"]:
+    of "true":
+      if flash > 16:
+        tb.write(borderXMargin, toInt(line / 2), fgYellow, "\u25c1")
+        tb.write(tb.width()-borderXMargin-1, toInt(line / 2), fgYellow, "\u25b7")
+      flash -= 1
+      if flash == 0: flash = 32
+    of "false":
+      tb.write(borderXMargin, toInt(line / 2), fgYellow, "\u25c1")
+      tb.write(tb.width()-borderXMargin-1, toInt(line / 2), fgYellow, "\u25b7")
   
 proc fileSelect : void =
   tb.write(xMargin, 1, styleBright, fgCyan, "Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
@@ -141,6 +161,25 @@ proc fileSelect : void =
     if fileIndex == selection:
       tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
       current = config["scanDir"] & file
+    else:
+      tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
+    fileIndex+=1
+    line+=1
+  tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
+  displayControls(1)
+
+proc fileRecent : void =
+  tb.write(xMargin, 1, styleBright, fgCyan, "Recent Files", resetStyle)
+  line = 3
+  fileIndex = 1
+  let history = readFile(historyFile)
+  recentFiles = history.split('\n')
+  if recentFiles.len > config["history"].parseInt():
+    recentFiles.delete(10, recentFiles.len-1)
+  for file in recentFiles:
+    if fileIndex == selection:
+      tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
+      current = file
     else:
       tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
     fileIndex+=1
@@ -158,6 +197,7 @@ proc fileView(filename : string) : void =
   line = displayIssues(issueBuffer[filename], filename)
   displayCursor()
   displayControls(2)
+  displayArrows()
 
 proc main(filename : string) : void =
   while true:
@@ -167,6 +207,7 @@ proc main(filename : string) : void =
     of FILE_SELECT:
       fileSelect()
       case key
+      of Key.S: fileRecent()
       of Key.None: discard
       of Key.Up, Key.K:
         if selection == 1:
@@ -225,6 +266,16 @@ proc main(filename : string) : void =
           discard p.waitForExit()
           closeNoQuit()
           p.close()
+        let history = readFile(historyFile)
+        recentFiles = history.split('\n')
+        recentFiles.insert(current, 0)
+        recentFiles = recentFiles.deduplicate()
+        if recentFiles.len > config["history"].parseInt():
+          recentFiles.delete(config["history"].parseInt(), recentFiles.len-1)
+        let f = open(historyFile, fmWrite)
+        defer: f.close()
+        for file in recentFiles:
+          f.writeLine(file)
         initProgram()
         todo("return to FILE_VIEW and reload after goto", "if not, maintain selection in FILE_SELECT")
         currentState = FILE_SELECT
