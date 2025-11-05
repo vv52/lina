@@ -54,13 +54,14 @@ proc initProgram =
   issueSelection = 1
 
 proc loadConfig : void =
-  config["scanDir"] = getAppDir()
-  config["editor"] = "hx"
-  config["controls"] = "true"
-  config["extensions"] = ".nim,.py"
-  config["arrow"] = "false"
-  config["flash"] = "false"
-  config["history"] = "10"
+  config["scanDir"] = getAppDir()   # ./ | /usr/user/home/
+  config["editor"] = "hx"           # hx | vi | vim | emacs | {any editor that supports +x}
+  config["controls"] = "true"       # true | false
+  config["extensions"] = ".nim,.py" # .ext,.ext,... | {empty for *}
+  config["arrow"] = "false"         # true | false
+  config["flash"] = "false"         # true | false
+  config["history"] = "10"          # 0 .. maxInt
+  config["ui"] = "nerd"             # nerd | simple
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -128,23 +129,6 @@ proc displayControls(offset : int = 0) =
     tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
     tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
     tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
-    # case currentState:
-    # of FILE_SELECT:
-    #   tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
-    #   tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
-    #   tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
-    #   tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
-    # of FILE_VIEW:
-    #   tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
-    #   tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
-    #   tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
-    #   tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
-    # of ISSUE_VIEW:
-    #   discard
-    # of DIRECT_VIEW:
-    #   discard
-    # of FILE_RECENT:
-    #   discard
       
 proc displayArrows =
   if config["arrow"] == "true":
@@ -160,7 +144,7 @@ proc displayArrows =
       tb.write(tb.width()-borderXMargin-1, toInt(line / 2), fgYellow, "\u25b7")
   
 proc fileSelect : void =
-  tb.write(xMargin, 1, styleBright, fgCyan, "Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
+  tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0969} Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
   line = 3
   fileIndex = 1
   for file in files:
@@ -174,14 +158,23 @@ proc fileSelect : void =
   tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
   displayControls(1)
 
-proc fileRecent : void =
-  tb.write(xMargin, 1, styleBright, fgCyan, "Recent Files", resetStyle)
+proc truncateRecentFiles : void =
+  if recentFiles.len > config["history"].parseInt():
+    recentFiles.delete(config["history"].parseInt() .. recentFiles.len-1)
+
+proc writeToHistory : void =
+    let history = readFile(historyFile)
+    recentFiles = history.split('\n')
+    recentFiles.insert(current, 0)
+    recentFiles = recentFiles.deduplicate()
+
+proc fileRecent : void =                   # \uebd4 \ue383
+  tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0abb} Recent Files", resetStyle)
   line = 3
   fileIndex = 1
   let history = readFile(historyFile)
   recentFiles = history.split('\n')
-  if recentFiles.len > config["history"].parseInt():
-    recentFiles.delete(10, recentFiles.len-1)
+  truncateRecentFiles()
   for file in recentFiles:
     if not file.isEmptyOrWhitespace:
       if fileIndex == selection:
@@ -205,6 +198,10 @@ proc fileView(filename : string) : void =
   displayCursor()
   displayControls(2)
   displayArrows()
+
+proc fileExplore : void =
+  tb.write(tb.width()-11, line, styleBright, fgCyan, "[EXPLORE]")
+  todo("implement FILE_EXPLORE mode", "basically DIRED")
 
 proc main(filename : string) : void =
   while true:
@@ -298,12 +295,8 @@ proc main(filename : string) : void =
           discard p.waitForExit()
           closeNoQuit()
           p.close()
-        let history = readFile(historyFile)
-        recentFiles = history.split('\n')
-        recentFiles.insert(current, 0)
-        recentFiles = recentFiles.deduplicate()
-        if recentFiles.len > config["history"].parseInt():
-          recentFiles.delete(config["history"].parseInt(), recentFiles.len-1)
+        writeToHistory()
+        truncateRecentFiles()
         let f = open(historyFile, fmWrite)
         defer: f.close()
         for file in recentFiles:
