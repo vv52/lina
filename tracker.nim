@@ -8,7 +8,7 @@ todo("FILE_EXPLORE", "expand FILE_SELECT into dired territory")
 
 type
   STATE = enum
-    FILE_SELECT, FILE_VIEW, ISSUE_VIEW, DIRECT_VIEW
+    FILE_SELECT, FILE_VIEW, ISSUE_VIEW, DIRECT_VIEW, FILE_RECENT
 const
   xMargin = 3
   yMargin = 3
@@ -124,21 +124,27 @@ proc displayIssues(issues : seq[Issue], filename : string) : int =
   
 proc displayControls(offset : int = 0) =
   if config["controls"] == "true":
-    case currentState:
-    of FILE_SELECT:
-      tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
-      tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
-      tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
-      tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
-    of FILE_VIEW:
-      tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
-      tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
-      tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
-      tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
-    of ISSUE_VIEW:
-      discard
-    of DIRECT_VIEW:
-      discard
+    tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+    tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
+    tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+    tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    # case currentState:
+    # of FILE_SELECT:
+    #   tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+    #   tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193] ", resetStyle, fgCyan, "Select")
+    #   tb.write(xMargin-1+14+14, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+    #   tb.write(xMargin-1+14+14+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    # of FILE_VIEW:
+    #   tb.write(xMargin-1, line+offset, styleBright, fgGreen, "[Enter] ", resetStyle, fgCyan, "Goto")
+    #   tb.write(xMargin-1+14, line+offset, styleBright, fgYellow, "[\u2191/\u2193/\u2190/\u2192] ", resetStyle, fgCyan, "Select")
+    #   tb.write(xMargin-1+14+18, line+offset, styleBright, fgMagenta, "[Esc] ", resetStyle, fgCyan, "Back")
+    #   tb.write(xMargin-1+14+18+12, line+offset, styleBright, fgRed, "[Q] ", resetStyle, fgCyan, "Quit")
+    # of ISSUE_VIEW:
+    #   discard
+    # of DIRECT_VIEW:
+    #   discard
+    # of FILE_RECENT:
+    #   discard
       
 proc displayArrows =
   if config["arrow"] == "true":
@@ -177,13 +183,14 @@ proc fileRecent : void =
   if recentFiles.len > config["history"].parseInt():
     recentFiles.delete(10, recentFiles.len-1)
   for file in recentFiles:
-    if fileIndex == selection:
-      tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
-      current = file
-    else:
-      tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
-    fileIndex+=1
-    line+=1
+    if not file.isEmptyOrWhitespace:
+      if fileIndex == selection:
+        tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
+        current = file
+      else:
+        tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
+      fileIndex+=1
+      line+=1
   tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
   displayControls(1)
 
@@ -207,7 +214,6 @@ proc main(filename : string) : void =
     of FILE_SELECT:
       fileSelect()
       case key
-      of Key.S: fileRecent()
       of Key.None: discard
       of Key.Up, Key.K:
         if selection == 1:
@@ -219,6 +225,32 @@ proc main(filename : string) : void =
           selection = 1
         else:
           selection += 1
+      of Key.Left, Key.H, Key.Right, Key.L:
+        currentState = FILE_RECENT
+        selection = 1
+      of Key.Enter, Key.Space:
+        issueSelection = 1
+        currentState = FILE_VIEW
+      of Key.Escape, Key.Q: close()
+      else:
+        discard
+    of FILE_RECENT:
+      fileRecent()
+      case key
+      of Key.None: discard
+      of Key.Up, Key.K:
+        if selection == 1:
+          selection = files.len
+        else:
+          selection -= 1
+      of Key.Down, Key.J:
+        if selection == files.len:
+          selection = 1
+        else:
+          selection += 1
+      of Key.Left, Key.H, Key.Right, Key.L:
+        currentState = FILE_SELECT
+        selection = 1
       of Key.Enter, Key.Space:
         issueSelection = 1
         currentState = FILE_VIEW
