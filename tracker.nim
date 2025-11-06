@@ -3,8 +3,8 @@ import std/[strutils, sequtils, strtabs, tables]
 import illwill, scan, todo
 
 todo("simple ui mode", "no special unicode symbols")
-todo("FILE_RECENT c STATE", "fileRecent works, need implement STATE")
 todo("FILE_EXPLORE", "expand FILE_SELECT into dired territory")
+todo("FILE_PIN / BOOKMARK", "FILE_RECENT but user-defined files")
 
 type
   STATE = enum
@@ -162,11 +162,29 @@ proc truncateRecentFiles : void =
   if recentFiles.len > config["history"].parseInt():
     recentFiles.delete(config["history"].parseInt() .. recentFiles.len-1)
 
+proc enterFileAndReturn : void =
+  var fileArgs : seq[string]
+  if fileIssues.len == 0:
+    fileArgs = @[current]
+  else:
+    fileArgs = @["+" & $fileIssues[issueSelection][1], current]
+  let p = startProcess(config["editor"], args=fileArgs, options=Opt)
+  discard p.waitForExit()
+  closeNoQuit()
+  p.close()
+
 proc writeToHistory : void =
-    let history = readFile(historyFile)
-    recentFiles = history.split('\n')
-    recentFiles.insert(current, 0)
-    recentFiles = recentFiles.deduplicate()
+  let history = readFile(historyFile)
+  recentFiles = history.split('\n')
+  recentFiles.insert(current, 0)
+  recentFiles = recentFiles.deduplicate()
+
+proc writeHistoryToDisk : void =
+  let f = open(historyFile, fmWrite)
+  defer: f.close()
+  for file in recentFiles:
+    f.writeLine(file)
+  
 
 proc fileRecent : void =                   # \uebd4 \ue383
   tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0abb} Recent Files", resetStyle)
@@ -212,6 +230,7 @@ proc main(filename : string) : void =
       fileSelect()
       case key
       of Key.None: discard
+      of Key.CtrlR: loadConfig()
       of Key.Up, Key.K:
         if selection == 1:
           selection = files.len
@@ -235,13 +254,14 @@ proc main(filename : string) : void =
       fileRecent()
       case key
       of Key.None: discard
+      of Key.CtrlR: loadConfig()
       of Key.Up, Key.K:
         if selection == 1:
-          selection = files.len
+          selection = recentFiles.len
         else:
           selection -= 1
       of Key.Down, Key.J:
-        if selection == files.len:
+        if selection == recentFiles.len:
           selection = 1
         else:
           selection += 1
@@ -258,6 +278,7 @@ proc main(filename : string) : void =
       fileView(current)
       case key
       of Key.None: discard
+      of Key.CtrlR: loadConfig()
       of Key.Up, Key.K:
         if issueSelection == 1:
           issueSelection = fileIssues.len
@@ -285,22 +306,10 @@ proc main(filename : string) : void =
         currentState = FILE_VIEW
         current = config["scanDir"] & files[selection-1]
       of Key.Enter, Key.Space:
-        if fileIssues.len == 0:
-          let p = startProcess(config["editor"], args=[current], options=Opt)
-          discard p.waitForExit()
-          closeNoQuit()
-          p.close()
-        else:
-          let p = startProcess(config["editor"], args=["+" & $fileIssues[issueSelection][1], current], options=Opt)
-          discard p.waitForExit()
-          closeNoQuit()
-          p.close()
+        enterFileAndReturn()
         writeToHistory()
         truncateRecentFiles()
-        let f = open(historyFile, fmWrite)
-        defer: f.close()
-        for file in recentFiles:
-          f.writeLine(file)
+        writeHistoryToDisk()
         initProgram()
         todo("return to FILE_VIEW and reload after goto", "if not, maintain selection in FILE_SELECT")
         currentState = FILE_SELECT
