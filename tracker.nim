@@ -62,6 +62,7 @@ proc loadConfig : void =
   config["flash"] = "false"         # true | false
   config["history"] = "10"          # 0 .. maxInt
   config["ui"] = "nerd"             # nerd | simple
+  config["return"] = "file"         # file | select | recent
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -173,7 +174,7 @@ proc enterFileAndReturn : void =
   closeNoQuit()
   p.close()
 
-proc writeToHistory : void =
+proc recordToRecentFilesInMemory : void =
   let history = readFile(historyFile)
   recentFiles = history.split('\n')
   recentFiles.insert(current, 0)
@@ -184,9 +185,13 @@ proc writeHistoryToDisk : void =
   defer: f.close()
   for file in recentFiles:
     f.writeLine(file)
-  
 
-proc fileRecent : void =                   # \uebd4 \ue383
+proc updateHistory : void =
+  recordToRecentFilesInMemory()
+  truncateRecentFiles()
+  writeHistoryToDisk()
+    
+proc fileRecent : void =
   tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0abb} Recent Files", resetStyle)
   line = 3
   fileIndex = 1
@@ -221,6 +226,30 @@ proc fileExplore : void =
   tb.write(tb.width()-11, line, styleBright, fgCyan, "[EXPLORE]")
   todo("implement FILE_EXPLORE mode", "basically DIRED")
 
+proc displayCalendar : void =
+  let calOut = execCmdEx("cal --color=always")
+  let calLines = calOut[0].split('\n')
+  let halfW = (tb.width() / 2).toInt()
+  let halfH = (tb.height() / 2).toInt()
+  tb.setBackgroundColor(bgBlack)
+  tb.fill(halfW - 12, halfH - 5, halfW + 11, halfH + 4, " ")
+  tb.setForegroundColor(fgCyan)
+  tb.drawRect(halfW - 12, halfH - 5, halfW + 11, halfH + 4, doubleStyle=true)
+  var rowNum = 0
+  for row in calLines:
+    if row.contains("[7m"):
+      var splitRow = row.replace("[7m", ",").replace("[0m", ",").split(',')
+      tb.write(halfW - 10, halfH - 4 + rowNum, fgYellow, splitRow[0], bgYellow, fgBlack, splitRow[1], bgBlack, fgYellow, splitRow[2])
+    else:
+      tb.write(halfW - 10, halfH - 4 + rowNum, fgWhite, row)
+    rowNum += 1
+  var key = Key.None
+  while not @[Key.C, Key.Escape].contains(key):
+    tb.display()
+    sleep(20)
+    key = getKey()
+    if key == Key.Q: close()
+
 proc main(filename : string) : void =
   while true:
     tb.clear()
@@ -247,6 +276,7 @@ proc main(filename : string) : void =
       of Key.Enter, Key.Space:
         issueSelection = 1
         currentState = FILE_VIEW
+      of Key.C: displayCalendar()
       of Key.Escape, Key.Q: close()
       else:
         discard
@@ -271,6 +301,7 @@ proc main(filename : string) : void =
       of Key.Enter, Key.Space:
         issueSelection = 1
         currentState = FILE_VIEW
+      of Key.C: displayCalendar()
       of Key.Escape, Key.Q: close()
       else:
         discard
@@ -307,12 +338,20 @@ proc main(filename : string) : void =
         current = config["scanDir"] & files[selection-1]
       of Key.Enter, Key.Space:
         enterFileAndReturn()
-        writeToHistory()
-        truncateRecentFiles()
-        writeHistoryToDisk()
+        updateHistory()
+        var temp = selection
         initProgram()
-        todo("return to FILE_VIEW and reload after goto", "if not, maintain selection in FILE_SELECT")
-        currentState = FILE_SELECT
+        case config["return"]:
+        of "file":
+          selection = temp
+          currentState = FILE_VIEW
+        of "select":
+          currentState = FILE_SELECT
+        of "recent":
+          currentState = FILE_RECENT
+        else:
+          echo """CONFIG ERROR: 'return' must be 'file', 'select', or 'return'"""
+      of Key.C: displayCalendar()
       of Key.Escape:
         currentState = FILE_SELECT
       of Key.Q: close()
