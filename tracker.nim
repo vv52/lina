@@ -1,14 +1,13 @@
 import std/[os, osproc, streams, unicode]
 import std/[strutils, sequtils, strtabs, tables]
-import illwill, scan, todo
+import illwill, stacks, scan, todo
 
 todo("simple ui mode", "no special unicode symbols")
-todo("FILE_EXPLORE", "expand FILE_SELECT into dired territory")
 todo("FILE_PIN / BOOKMARK", "FILE_RECENT but user-defined files")
 
 type
   STATE = enum
-    FILE_SELECT, FILE_VIEW, ISSUE_VIEW, DIRECT_VIEW, FILE_RECENT
+    FILE_SELECT, FILE_VIEW, ISSUE_VIEW, FILE_EXPLORE, DIRECT_VIEW, FILE_RECENT
 const
   xMargin = 3
   yMargin = 3
@@ -18,7 +17,12 @@ const
     poUsePath,
     poParentStreams
   }
-
+  dirIcon = "\ueaf7 "
+  codeIcon = "\ueae9 " 
+  symbolicIcon = "\ueb15 "
+  folderIcon = "\uea83 "
+  fileIcon = "\uea7b "
+  notifIcon = "\uf444"
 var
   tb = newTerminalBuffer(terminalWidth(), terminalHeight())
   currentState : STATE = FILE_SELECT
@@ -30,9 +34,13 @@ var
   fileIndex = 1
   selection = 1
   issueSelection = 1
+  itemSelection = 1
   current : string
   flash = 32
   historyFile = "history.txt"
+  currentPath : string
+  currentDirPaths : seq[(PathComponent, string)]
+  lastPath = Stack[string]()
 
 proc close() {.noconv.} =
   illwillDeinit()
@@ -223,8 +231,37 @@ proc fileView(filename : string) : void =
   displayArrows()
 
 proc fileExplore : void =
-  tb.write(tb.width()-11, line, styleBright, fgCyan, "[EXPLORE]")
-  todo("implement FILE_EXPLORE mode", "basically DIRED")
+  var
+    count = 0
+    found = false
+  tb.write(tb.width()-11, 2, styleBright, fgCyan, "[EXPLORE]")
+  tb.write(2, 2, styleBright, fgYellow, dirIcon, currentPath, resetStyle)
+  setCurrentDir(currentPath)
+  currentDirPaths.setLen(0)
+  for item in walkDir(currentPath, relative=false):
+    currentDirPaths.add(item)
+    case item.kind:
+    of pcFile:
+      for extension in config["extensions"].split(","):
+        if item.path.endsWith(extension):
+          found = true
+          tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, item.path.relativePath(currentPath))
+      if not found:
+        tb.write(4, 3 + count, fgWhite, fileIcon, resetStyle, item.path.relativePath(currentPath))
+      found = false
+    of pcLinkToFile:
+      for extension in config["extensions"].split(","):
+        if item.path.endsWith(extension):
+          found = true
+          tb.write(4, 3 + count, fgCyan, symbolicIcon, fgMagenta, codeIcon, resetStyle, item.path.relativePath(currentPath))
+      if not found:
+        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgYellow, fileIcon, resetStyle, item.path.relativePath(currentPath))
+      found = false
+    of pcDir:
+      tb.write(4, 3 + count, fgYellow, folderIcon, resetStyle, item.path.relativePath(currentPath))
+    of pcLinkToDir:
+      tb.write(4, 3 + count, fgCyan, symbolicIcon, fgBlue, folderIcon, resetStyle, item.path.relativePath(currentPath))
+    count += 1
 
 proc displayCalendar : void =
   let calOut = execCmdEx("cal --color=always")
@@ -276,6 +313,9 @@ proc main(filename : string) : void =
       of Key.Enter, Key.Space:
         issueSelection = 1
         currentState = FILE_VIEW
+      of Key.E:
+        currentState = FILE_EXPLORE
+        currentPath = expandFilename(config["scanDir"])
       of Key.C: displayCalendar()
       of Key.Escape, Key.Q: close()
       else:
@@ -302,6 +342,9 @@ proc main(filename : string) : void =
         issueSelection = 1
         currentState = FILE_VIEW
       of Key.C: displayCalendar()
+      of Key.E:
+        currentState = FILE_EXPLORE
+        currentPath = config["scanDir"].expandFilename
       of Key.Escape, Key.Q: close()
       else:
         discard
@@ -352,6 +395,9 @@ proc main(filename : string) : void =
         else:
           echo """CONFIG ERROR: 'return' must be 'file', 'select', or 'return'"""
       of Key.C: displayCalendar()
+      of Key.E:
+        currentState = FILE_EXPLORE
+        currentPath = config["scanDir"].expandFilename
       of Key.Escape:
         currentState = FILE_SELECT
       of Key.Q: close()
@@ -359,6 +405,44 @@ proc main(filename : string) : void =
         discard
     of ISSUE_VIEW:
       discard
+    of FILE_EXPLORE:
+      fileExplore()
+      case key
+      of Key.None: discard
+      of Key.CtrlR: loadConfig()
+      of Key.Up, Key.K:
+        if itemSelection == 1:
+          itemSelection = currentDirPaths.len
+        else: itemSelection -= 1
+      of Key.Down, Key.J:
+        if itemSelection == currentDirPaths.len:
+          itemSelection = 1
+        else: itemSelection += 1
+      of Key.Left, Key.H:
+        if not currentPath.isRootDir and not currentPath.isEmptyOrWhitespace:
+          lastPath.push(currentPath)
+          currentPath = currentPath.parentDir
+          itemSelection = 1
+          currentDirPaths.setLen(0)
+      of Key.Right, Key.L:
+        if currentDirPaths.len > 0:
+          if currentDirPaths[itemSelection - 1][0] == pcDir:
+            lastPath.push(currentPath)
+            currentPath = expandFilename(currentDirPaths[itemSelection - 1][1])
+            itemSelection = 1
+            currentDirPaths.setLen(0)
+        else:
+          currentPath = lastPath.pop
+          itemSelection = 1
+          currentDirPaths.setLen(0)
+      of Key.Enter, Key.Space:
+        discard
+      of Key.Escape:
+        currentState = FILE_RECENT
+        setCurrentDir(getAppDir())
+      of Key.Q: close()
+      else:
+        discard
     of DIRECT_VIEW:
       fileView(filename)
     tb.display()

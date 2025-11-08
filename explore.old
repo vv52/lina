@@ -1,0 +1,68 @@
+import std/[os, osproc, streams, unicode]
+import std/[strutils, sequtils, strtabs, tables]
+import illwill, scan, todo
+
+var
+  tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+  currentPath : string
+  currentDirPaths : seq[(PathComponent, string)]
+  config = newStringTable()
+
+proc close() {.noconv.} =
+  illwillDeinit()
+  showCursor()
+  quit(0)
+
+proc closeNoQuit() {.noconv.} =
+  illwillDeinit()
+  showCursor()
+
+proc initProgram =
+  illwillInit(fullscreen=true)
+  setControlCHook(close)
+  hideCursor()
+  tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+  tb.clear()
+
+proc fileExplore : void =
+  config["extensions"] = ".nim,.py"
+  let
+    dirIcon = "\ueaf7 "
+    codeIcon = "\ueae9 " 
+    symbolicIcon = "\ueb15 "
+    folderIcon = "\uea83 "
+    fileIcon = "\uea7b "
+    notifIcon = "\uf444"
+  var
+    count = 0
+    found = false
+  setCurrentDir(currentPath)
+  tb.write(tb.width()-11, 2, styleBright, fgCyan, "[EXPLORE]")
+  tb.write(2, 2, styleBright, fgYellow, dirIcon, currentPath, resetStyle)
+  for item in walkDir(currentPath, relative=true):
+    currentDirPaths.add(item)
+    case item.kind:
+    of pcFile:
+      for extension in config["extensions"].split(","):
+        if item.path.endsWith(extension):
+          found = true
+          tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, item.path)
+      if not found:
+        tb.write(4, 3 + count, fgWhite, fileIcon, resetStyle, item.path)
+      found = false
+    of pcLinkToFile:
+      if item.path.endsWith(".nim"):
+        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgMagenta, codeIcon, resetStyle, item.path)
+      else:
+        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgYellow, fileIcon, resetStyle, item.path)
+    of pcDir:
+      tb.write(4, 3 + count, fgYellow, folderIcon, resetStyle, item.path)
+    of pcLinkToDir:
+      tb.write(4, 3 + count, fgCyan, symbolicIcon, fgBlue, folderIcon, resetStyle, item.path)
+    count += 1
+  tb.display
+
+if isMainModule:
+  initProgram()
+  currentPath = "./"
+  fileExplore()
