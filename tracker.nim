@@ -23,6 +23,7 @@ const
   folderIcon = "\uea83 "
   fileIcon = "\uea7b "
   notifIcon = "\uf444"
+  nextDirIcon = " \uf101"
 var
   tb = newTerminalBuffer(terminalWidth(), terminalHeight())
   currentState : STATE = FILE_SELECT
@@ -55,6 +56,7 @@ proc initProgram =
   illwillInit(fullscreen=true)
   setControlCHook(close)
   hideCursor()
+  setCurrentDir(getAppDir())
   tb = newTerminalBuffer(terminalWidth(), terminalHeight())
   tb.clear()
   fileIssues = initTable[int, (int, int)]()
@@ -71,6 +73,7 @@ proc loadConfig : void =
   config["history"] = "10"          # 0 .. maxInt
   config["ui"] = "nerd"             # nerd | simple
   config["return"] = "file"         # file | select | recent
+  config["default"] = "select"      # file | select | recent | explore (not implemented)
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -84,7 +87,7 @@ proc loadConfig : void =
     writeFile(historyFile, "")
 
 proc loadFilesFromScanDir =
-  for file in walkDirRec(config["scanDir"], relative=true, checkDir=true):
+  for file in walkDirRec(config["scanDir"].expandTilde.expandFilename, relative=true, checkDir=true):
     for extension in config["extensions"].split(","):
       if file.endsWith(extension):
         files.add(file)
@@ -114,6 +117,7 @@ proc displayIssue(i : Issue, line : int, filename : string) : int =
       result = line+4
 
 proc displayIssues(issues : seq[Issue], filename : string) : int =
+  todo("Implement pages if longer than screen")
   var
     line = yMargin
     issues = scan(filename)
@@ -126,10 +130,6 @@ proc displayIssues(issues : seq[Issue], filename : string) : int =
   if line == yMargin:
     tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "[DONE] ", resetStyle, "Nothing to do")
     line+=2
-  tb.setForegroundColor(fgCyan)
-  tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line, doubleStyle=true)
-  tb.write(0, 1, styleBright, fgCyan, "//[", fgYellow, filename, fgCyan, "]")
-  tb.write(tb.width()-11, line, styleBright, fgCyan, "[TRACKER]")
   return line
   
 proc displayControls(offset : int = 0) =
@@ -153,13 +153,14 @@ proc displayArrows =
       tb.write(tb.width()-borderXMargin-1, toInt(line / 2), fgYellow, "\u25b7")
   
 proc fileSelect : void =
+  todo("Implement pages if longer than screen")
   tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0969} Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
   line = 3
   fileIndex = 1
   for file in files:
     if fileIndex == selection:
       tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
-      current = config["scanDir"] & file
+      current = config["scanDir"].expandTilde.expandFilename / file
     else:
       tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
     fileIndex+=1
@@ -209,10 +210,10 @@ proc fileRecent : void =
   for file in recentFiles:
     if not file.isEmptyOrWhitespace:
       if fileIndex == selection:
-        tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file, resetStyle)
+        tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle)
         current = file
       else:
-        tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file, resetStyle)
+        tb.write(xMargin, line, resetStyle, "  ", $fileIndex, ". ", file.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle)
       fileIndex+=1
       line+=1
   tb.write(tb.width()-11, 1, styleBright, fgCyan, "[TRACKER]")
@@ -226,6 +227,10 @@ proc fileView(filename : string) : void =
   if not issueBuffer.hasKey(filename):
     issueBuffer[filename] = scan(filename)
   line = displayIssues(issueBuffer[filename], filename)
+  tb.setForegroundColor(fgCyan)
+  tb.drawRect(borderXMargin, borderYMargin+1, tb.width()-borderXMargin-1, line, doubleStyle=true)
+  tb.write(0, 1, styleBright, fgCyan, "//[", fgYellow, config["scanDir"] / filename.relativePath(config["scanDir"].expandTilde.expandFilename), fgCyan, "]")
+  tb.write(tb.width()-11, line, styleBright, fgCyan, "[TRACKER]")
   displayCursor()
   displayControls(2)
   displayArrows()
@@ -245,22 +250,40 @@ proc fileExplore : void =
       for extension in config["extensions"].split(","):
         if item.path.endsWith(extension):
           found = true
-          tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, item.path.relativePath(currentPath))
+          if count + 1 == itemSelection:
+            tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, fgGreen, item.path.relativePath(currentPath))
+          else:
+            tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, item.path.relativePath(currentPath))
       if not found:
-        tb.write(4, 3 + count, fgWhite, fileIcon, resetStyle, item.path.relativePath(currentPath))
+        if count + 1 == itemSelection:
+          tb.write(4, 3 + count, fgWhite, fileIcon, resetStyle, fgGreen, item.path.relativePath(currentPath))
+        else:
+          tb.write(4, 3 + count, fgWhite, fileIcon, resetStyle, item.path.relativePath(currentPath))
       found = false
     of pcLinkToFile:
       for extension in config["extensions"].split(","):
         if item.path.endsWith(extension):
           found = true
-          tb.write(4, 3 + count, fgCyan, symbolicIcon, fgMagenta, codeIcon, resetStyle, item.path.relativePath(currentPath))
+          if count + 1 == itemSelection:
+            tb.write(4, 3 + count, fgCyan, symbolicIcon, fgMagenta, codeIcon, resetStyle, fgGreen, item.path.relativePath(currentPath))
+          else:
+            tb.write(4, 3 + count, fgCyan, symbolicIcon, fgMagenta, codeIcon, resetStyle, item.path.relativePath(currentPath))
       if not found:
-        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgYellow, fileIcon, resetStyle, item.path.relativePath(currentPath))
+        if count + 1 == itemSelection:
+          tb.write(4, 3 + count, fgCyan, symbolicIcon, fgYellow, fileIcon, resetStyle, fgGreen, item.path.relativePath(currentPath))
+        else:
+          tb.write(4, 3 + count, fgCyan, symbolicIcon, fgYellow, fileIcon, resetStyle, item.path.relativePath(currentPath))
       found = false
     of pcDir:
-      tb.write(4, 3 + count, fgYellow, folderIcon, resetStyle, item.path.relativePath(currentPath))
+      if count + 1 == itemSelection:
+        tb.write(4, 3 + count, fgYellow, folderIcon, resetStyle, fgGreen, item.path.relativePath(currentPath), nextDirIcon)
+      else:
+        tb.write(4, 3 + count, fgYellow, folderIcon, resetStyle, item.path.relativePath(currentPath))
     of pcLinkToDir:
-      tb.write(4, 3 + count, fgCyan, symbolicIcon, fgBlue, folderIcon, resetStyle, item.path.relativePath(currentPath))
+      if count + 1 == itemSelection:
+        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgBlue, folderIcon, resetStyle, item.path.relativePath(currentPath), nextDirIcon)
+      else:
+        tb.write(4, 3 + count, fgCyan, symbolicIcon, fgBlue, folderIcon, resetStyle, item.path.relativePath(currentPath))
     count += 1
 
 proc displayCalendar : void =
@@ -315,7 +338,7 @@ proc main(filename : string) : void =
         currentState = FILE_VIEW
       of Key.E:
         currentState = FILE_EXPLORE
-        currentPath = expandFilename(config["scanDir"])
+        currentPath = config["scanDir"].expandTilde.expandFilename
       of Key.C: displayCalendar()
       of Key.Escape, Key.Q: close()
       else:
@@ -344,12 +367,13 @@ proc main(filename : string) : void =
       of Key.C: displayCalendar()
       of Key.E:
         currentState = FILE_EXPLORE
-        currentPath = config["scanDir"].expandFilename
+        currentPath = config["scanDir"].expandTilde.expandFilename
       of Key.Escape, Key.Q: close()
       else:
         discard
     of FILE_VIEW:
       fileView(current)
+      todo("config[\"showDone\"] = true", "false: skip files with no tasks")
       case key
       of Key.None: discard
       of Key.CtrlR: loadConfig()
@@ -368,17 +392,15 @@ proc main(filename : string) : void =
           selection = files.len
         else:
           selection -= 1
-        issueSelection = 1
-        currentState = FILE_VIEW
-        current = config["scanDir"] & files[selection-1]
+          issueSelection = 1
+        current = config["scanDir"].expandTilde.expandFilename / files[selection-1]
       of Key.Right, Key.L:
         if selection == files.len:
           selection = 1
         else:
           selection += 1
         issueSelection = 1
-        currentState = FILE_VIEW
-        current = config["scanDir"] & files[selection-1]
+        current = config["scanDir"].expandTilde.expandFilename / files[selection-1]
       of Key.Enter, Key.Space:
         enterFileAndReturn()
         updateHistory()
@@ -397,7 +419,7 @@ proc main(filename : string) : void =
       of Key.C: displayCalendar()
       of Key.E:
         currentState = FILE_EXPLORE
-        currentPath = config["scanDir"].expandFilename
+        currentPath = config["scanDir"].expandTilde.expandFilename
       of Key.Escape:
         currentState = FILE_SELECT
       of Key.Q: close()
@@ -431,6 +453,8 @@ proc main(filename : string) : void =
             currentPath = expandFilename(currentDirPaths[itemSelection - 1][1])
             itemSelection = 1
             currentDirPaths.setLen(0)
+          todo("elif pcFile and tracked extension", "open in editor (maybe Key.Enter/Space instead?)")
+          todo("handle symbolic links")
         else:
           currentPath = lastPath.pop
           itemSelection = 1
@@ -458,4 +482,14 @@ when isMainModule:
     current = params[0]
     main(current)
   else:
+    todo("of \"explore\"")
+    case config["default"]:
+    of "file":
+      currentState = FILE_VIEW
+    of "select":
+      currentState = FILE_SELECT
+    of "recent":
+      currentState = FILE_RECENT
+    else:
+      echo """CONFIG ERROR: 'default' must be 'file', 'select', or 'return'"""
     main("")
