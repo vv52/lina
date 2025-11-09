@@ -2,7 +2,6 @@ import std/[os, osproc, streams, unicode]
 import std/[strutils, sequtils, strtabs, tables]
 import illwill, stacks, scan, todo
 
-todo("simple ui mode", "no special unicode symbols")
 todo("FILE_PIN / BOOKMARK", "FILE_RECENT but user-defined files")
 
 type
@@ -17,6 +16,7 @@ const
     poUsePath,
     poParentStreams
   }
+var
   dirIcon = "\ueaf7 "
   codeIcon = "\ueae9 " 
   symbolicIcon = "\ueb15 "
@@ -24,7 +24,9 @@ const
   fileIcon = "\uea7b "
   notifIcon = "\uf444"
   nextDirIcon = " \uf101"
-var
+  fileSelectIcon = "\u{f0969} "
+  fileRecentIcon = "\u{f0abb} "
+  cursor = "⩺"
   tb = newTerminalBuffer(terminalWidth(), terminalHeight())
   currentState : STATE = FILE_SELECT
   issueBuffer = initTable[string, seq[Issue]]()
@@ -74,6 +76,8 @@ proc loadConfig : void =
   config["ui"] = "nerd"             # nerd | simple
   config["return"] = "file"         # file | select | recent
   config["default"] = "select"      # file | select | recent | explore (not implemented)
+  var returnPath = currentPath
+  setCurrentDir(getAppDir())
   if fileExists("./config.ini"):
     let configFile = newFileStream("./config.ini")
     let options = configFile.readAll()
@@ -85,7 +89,20 @@ proc loadConfig : void =
         config[option[0].strip] = option[1].strip
   if not fileExists(historyFile):
     writeFile(historyFile, "")
-
+  if config["ui"] == "simple":
+    dirIcon = "dir  "
+    codeIcon = "code " 
+    symbolicIcon = "*"
+    folderIcon = "dir  "
+    fileIcon = "file "
+    notifIcon = "'"
+    nextDirIcon = " >>"
+    fileSelectIcon = ""
+    fileRecentIcon = ""
+    cursor = ">"
+  if not returnPath.isEmptyOrWhitespace:
+    setCurrentDir(returnPath)
+    
 proc loadFilesFromScanDir =
   for file in walkDirRec(config["scanDir"].expandTilde.expandFilename, relative=true, checkDir=true):
     for extension in config["extensions"].split(","):
@@ -154,7 +171,7 @@ proc displayArrows =
   
 proc fileSelect : void =
   todo("Implement pages if longer than screen")
-  tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0969} Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
+  tb.write(xMargin, 1, styleBright, fgCyan, fileSelectIcon, "Scan Directory: ", fgYellow, config["scanDir"], resetStyle)
   line = 3
   fileIndex = 1
   for file in files:
@@ -173,21 +190,31 @@ proc truncateRecentFiles : void =
     recentFiles.delete(config["history"].parseInt() .. recentFiles.len-1)
 
 proc enterFileAndReturn : void =
-  var fileArgs : seq[string]
-  if fileIssues.len == 0:
-    fileArgs = @[current]
+  if currentState == FILE_EXPLORE:
+    var fileArgs = @[currentDirPaths[itemSelection - 1][1]]
+    let p = startProcess(config["editor"], args=fileArgs, options=Opt)
+    discard p.waitForExit()
+    closeNoQuit()
+    p.close()
   else:
-    fileArgs = @["+" & $fileIssues[issueSelection][1], current]
-  let p = startProcess(config["editor"], args=fileArgs, options=Opt)
-  discard p.waitForExit()
-  closeNoQuit()
-  p.close()
+    var fileArgs : seq[string]
+    if fileIssues.len == 0:
+      fileArgs = @[current]
+    else:
+      fileArgs = @["+" & $fileIssues[issueSelection][1], current]
+    let p = startProcess(config["editor"], args=fileArgs, options=Opt)
+    discard p.waitForExit()
+    closeNoQuit()
+    p.close()
 
 proc recordToRecentFilesInMemory : void =
+  var returnPath = currentPath
+  setCurrentDir(getAppDir())
   let history = readFile(historyFile)
   recentFiles = history.split('\n')
   recentFiles.insert(current, 0)
   recentFiles = recentFiles.deduplicate()
+  setCurrentDir(returnPath)
 
 proc writeHistoryToDisk : void =
   let f = open(historyFile, fmWrite)
@@ -201,7 +228,7 @@ proc updateHistory : void =
   writeHistoryToDisk()
     
 proc fileRecent : void =
-  tb.write(xMargin, 1, styleBright, fgCyan, "\u{f0abb} Recent Files", resetStyle)
+  tb.write(xMargin, 1, styleBright, fgCyan, fileRecentIcon, "Recent Files", resetStyle)
   line = 3
   fileIndex = 1
   let history = readFile(historyFile)
@@ -221,7 +248,7 @@ proc fileRecent : void =
 
 proc displayCursor : void =
   if fileIssues.len > 1:
-    tb[xMargin-1, fileIssues[issueSelection][0]] = TerminalChar(ch: "⩺".runeAt(0), fg: fgGreen, bg: bgNone, style: {styleBright})
+    tb[xMargin-1, fileIssues[issueSelection][0]] = TerminalChar(ch: cursor.runeAt(0), fg: fgGreen, bg: bgNone, style: {styleBright})
 
 proc fileView(filename : string) : void =
   if not issueBuffer.hasKey(filename):
@@ -251,7 +278,7 @@ proc fileExplore : void =
         if item.path.endsWith(extension):
           found = true
           if count + 1 == itemSelection:
-            tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, fgGreen, item.path.relativePath(currentPath))
+            tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, fgGreen, item.path.relativePath(currentPath), nextDirIcon, " hx")
           else:
             tb.write(4, 3 + count, fgCyan, codeIcon, resetStyle, item.path.relativePath(currentPath))
       if not found:
@@ -453,7 +480,14 @@ proc main(filename : string) : void =
             currentPath = expandFilename(currentDirPaths[itemSelection - 1][1])
             itemSelection = 1
             currentDirPaths.setLen(0)
-          todo("elif pcFile and tracked extension", "open in editor (maybe Key.Enter/Space instead?)")
+          elif currentDirPaths[itemSelection - 1][0] == pcFile:
+            for extension in config["extensions"].split(","):
+              if currentDirPaths[itemSelection - 1][1].endsWith(extension):
+                enterFileAndReturn()
+                updateHistory()
+                initProgram()
+                currentState = FILE_EXPLORE
+                setCurrentDir(currentPath)
           todo("handle symbolic links")
         else:
           currentPath = lastPath.pop
