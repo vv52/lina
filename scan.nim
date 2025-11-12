@@ -77,7 +77,7 @@ proc scan*(filename : string) : seq[Issue]  =
     fs.close()
   return concat(priorityIssues, todoIssues)
     
-proc printFileStatus(filename : string) : void =
+proc printFileStatus*(filename : string) : void =
   var length = terminalWidth() - 10 - filename.len
   var spacer = "_".repeat(length)
   styledEcho styleBright, fgCyan, "//_FILE_[", fgYellow, filename, fgCyan, "]", spacer
