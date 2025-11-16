@@ -1,4 +1,5 @@
-import std/[re, streams, strutils, sequtils, terminal]
+import std/[os, re, streams, strutils]
+import std/[sequtils, terminal]
 
 type
   PRIORITY_LEVEL* = enum
@@ -76,6 +77,13 @@ proc scan*(filename : string) : seq[Issue]  =
           todoIssues.add(Issue(line : count, message : contents[0], level : TODO))
     fs.close()
   return concat(priorityIssues, todoIssues)
+
+proc hasTodo*(filename : string) : bool  =
+  let
+    file = readFile(filename.expandTilde.expandFilename)
+    p = find(file, priorityPattern, matches, start=0)
+    t = find(file, todoPattern, matches, start=0)
+  return (p >= 0) or (t >= 0)
     
 proc printFileStatus*(filename : string) : void =
   var length = terminalWidth() - 10 - filename.len

@@ -1,10 +1,10 @@
-# tracker
+# Lina
 
-TUI tool to scan source files for todo("messages") and other similar calls, reporting their contents, line number, and file name. This was built to interact with my todo nimble package for nim projects but could theoretically work with any language supporting the aforementioned call syntax, you would just need to implement todo procs
+TUI tool to scan source files for todo\(\"messages\"\) and other similar calls, reporting their contents, line number, and file name. This was built to interact with my todo nimble package for nim projects but could theoretically work with any language supporting the aforementioned call syntax, you would just need to implement todo procs
 
 **File explore mode now focus of dev** -- currently supports navigation, cut/copy/paste/delete, displaying file info, displaying the contents of files, and opening files with tracked extensions in configured editor
 
-## dependencies
+## Dependencies
 
 ```
   nimble install illwave
@@ -14,3 +14,16 @@ TUI tool to scan source files for todo("messages") and other similar calls, repo
 ```
 
 NerdFont-compatible font recommended for icon rendering. Otherwise, set "ui" to "simple" in config.ini (default "nerd")
+
+## Usage
+```
+  ./lina            run Lina
+  ./lina -e         run Lina, skip splash if enabled and open EXPLORE mode
+  ./lina -v {file}  open file issues directly, does not escape to full program
+```
+
+### TRACKER
+todo-scanner and project home
+
+### EXPLORE
+tui file explorer

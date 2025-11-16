@@ -2,9 +2,9 @@ import std/[os, osproc]
 import std/[streams, times, unicode]
 import std/[strutils, sequtils, strtabs, tables]
 import illwill, stacks, simple_parseopt
-import scan, todo
+import scan, wrap, todo
 
-todo("FILE_PIN / BOOKMARK", "FILE_RECENT but user-defined files")
+todo("FILE_PIN", "FILE_RECENT but user-defined files, Key.Asterisk, star ascii, from anywhere")
 
 type
   STATE = enum
@@ -62,7 +62,6 @@ var
   bottom = tb.height - 2 - 1
   pos = 0
   posMax = 0
-let
   bottomReset = tb.height - 2 - 1
   scrollStartUp = (tb.height / 3).toInt + 1
   scrollStartDown = ((tb.height / 3) * 2).toInt
@@ -102,6 +101,7 @@ proc loadConfig : void =
   config["default"] = "select"      # file | select | recent | explore (not implemented)
   config["splash"] = "true"         # true | false
   config["clock"] = "true"          # true | false
+  config["todoOnly"] = "false"      # true | false
   var returnPath = currentPath
   discard existsOrCreateDir(getConfigDir() / "lina/")
   setCurrentDir(getConfigDir() / "lina/")
@@ -114,6 +114,10 @@ proc loadConfig : void =
       if line != "":
         option = line.split('=')
         config[option[0].strip] = option[1].strip
+    todo("refactor all the filename expand calls")
+    # config["scanDir"] = config["scanDir"].expandTilde.expandFilename
+  discard existsOrCreateDir(getDataDir() / "lina/")
+  setCurrentDir(getDataDir() / "lina/")
   if not fileExists(historyFile):
     writeFile(historyFile, "")
   if config["ui"] == "simple":
@@ -141,10 +145,14 @@ proc loadConfig : void =
     
 proc loadFilesFromScanDir =
   files.setLen(0)
-  for file in walkDirRec(config["scanDir"].expandTilde.expandFilename, relative=true, checkDir=true):
+  for file in walkDirRec(config["scanDir"].expandTilde.expandFilename, relative=false, checkDir=true):
     for extension in config["extensions"].split(","):
       if file.endsWith(extension):
-        files.add(file)
+        if config["todoOnly"].parseBool:
+          if file.hasTodo:
+            files.add(file)
+        else:
+          files.add(file)
 
 proc resetProgram =
   loadConfig()
@@ -186,6 +194,7 @@ proc formatKind(k : PathComponent) : string =
 
 proc displayIssue(i : Issue, line : int, filename : string) : int =
   todo("Implement wordwrap")
+  var add = 0
   case i.level:
   of PRIORITY:
     if i.description == "":
@@ -194,9 +203,17 @@ proc displayIssue(i : Issue, line : int, filename : string) : int =
       result = line+3
     else:
       tb.write(xMargin, line, resetStyle, styleBright, fgRed, "[HIGH PRIORITY] ", resetStyle, bgYellow, fgBlack, i.message)
-      tb.write(xMargin, line+1, resetStyle, " ", fgMagenta, i.description)
-      tb.write(xMargin, line+2, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
-      result = line+4
+      if i.description.len + xMargin + 1 > tb.width:
+        var multi = wrap(i.description, tb.width - xMargin - 3)
+        for l in multi:
+          tb.write(xMargin, line+1+add, resetStyle, " ", fgMagenta, l)
+          add += 1
+        tb.write(xMargin, line+1+add, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
+        result = line+3+add
+      else:
+        tb.write(xMargin, line+1, resetStyle, " ", fgMagenta, i.description)
+        tb.write(xMargin, line+2, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
+        result = line+4
   of TODO:
     if i.description == "":
       tb.write(xMargin, line, resetStyle, styleBright, fgYellow, "[TODO] ", resetStyle, i.message)
@@ -204,9 +221,17 @@ proc displayIssue(i : Issue, line : int, filename : string) : int =
       result = line+3
     else:
       tb.write(xMargin, line, resetStyle, styleBright, fgYellow, "[TODO] ", resetStyle, i.message)
-      tb.write(xMargin, line+1, resetStyle, " ", fgYellow, i.description)
-      tb.write(xMargin, line+2, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
-      result = line+4
+      if i.description.len + xMargin + 1 > tb.width:
+        var multi = wrap(i.description, tb.width - xMargin - 3)
+        for l in multi:
+          tb.write(xMargin, line+1+add, resetStyle, " ", fgYellow, l)
+          add += 1
+        tb.write(xMargin, line+1+add, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
+        result = line+3+add
+      else:
+        tb.write(xMargin, line+1, resetStyle, " ", fgYellow, i.description)
+        tb.write(xMargin, line+2, resetStyle, " ", inFileIcon, fgCyan, codeIcon, styleUnderscore, fgCyan, filename.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle, styleBright, fgCyan, ":", $i.line)
+        result = line+4
 
 proc displayIssues(issues : seq[Issue], filename : string) : int =
   todo("Implement pages if longer than screen")
@@ -258,10 +283,11 @@ proc fileSelect : void =
       bottom -= 1  
   while top + pos < bottom and top + pos < files.len:
     if top + pos + 1 == selection:
-      tb.write(xMargin, 3 + pos, resetStyle, styleBright, fgGreen, "  ", $(top + pos + 1), ". ", files[top + pos], resetStyle)
-      current = config["scanDir"].expandTilde.expandFilename / files[top + pos]
+      tb.write(xMargin, 3 + pos, resetStyle, styleBright, fgGreen, "  ", $(top + pos + 1), ". ", files[top + pos].relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle)
+      current = files[top + pos]
+      # current = config["scanDir"].expandTilde.expandFilename / files[top + pos]
     else:
-      tb.write(xMargin, 3 + pos, resetStyle, "  ", $(top + pos + 1), ". ", files[top + pos], resetStyle)
+      tb.write(xMargin, 3 + pos, resetStyle, "  ", $(top + pos + 1), ". ", files[top + pos].relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle)
     pos += 1
   posMax = pos
   if top > 0:
@@ -272,8 +298,14 @@ proc fileSelect : void =
     tb.write(2, verticalDotsOffset, fgCyan, verticalDots)
 
 proc truncateRecentFiles : void =
-  if recentFiles.len > config["history"].parseInt():
-    recentFiles.delete(config["history"].parseInt() .. recentFiles.len-1)
+  var keep : seq[string]
+  for file in recentFiles:
+    if fileExists(file):
+      keep.add(file)
+  if keep.len > config["history"].parseInt():
+    keep.delete(config["history"].parseInt() .. keep.len-1)
+  recentFiles.setLen(0)
+  recentFiles = keep
 
 proc enterShellAndReturn : void =
   if currentState == FILE_EXPLORE:
@@ -290,7 +322,6 @@ proc editConfig : void =
   p.close()
 
 proc enterFileAndReturn : void =
-  todo("refactor this")
   if currentState == FILE_EXPLORE:
     var fileArgs = @[currentDirPaths[itemSelection - 1][1]]
     let p = startProcess(config["editor"], args=fileArgs, options=Opt)
@@ -310,7 +341,8 @@ proc enterFileAndReturn : void =
 
 proc recordToRecentFilesInMemory : void =
   var returnPath = currentPath
-  setCurrentDir(getConfigDir() / "lina/")
+  # setCurrentDir(getConfigDir() / "lina/")
+  setCurrentDir(getDataDir() / "lina/")
   let history = readFile(historyFile)
   recentFiles = history.split('\n')
   recentFiles.insert(current.expandTilde.expandFilename, 0)
@@ -321,11 +353,12 @@ proc recordToRecentFilesInMemory : void =
 
 proc writeHistoryToDisk : void =
   var returnPath = currentPath
-  setCurrentDir(getConfigDir() / "lina/")
+  # setCurrentDir(getConfigDir() / "lina/")
+  setCurrentDir(getDataDir() / "lina/")
   let f = open(historyFile, fmWrite)
-  defer: f.close()
   for file in recentFiles:
     f.writeLine(file)
+  f.close()
   if not returnPath.isEmptyOrWhitespace:
     setCurrentDir(returnPath)
   else: setCurrentDir(getAppDir())
@@ -339,13 +372,16 @@ proc fileRecent : void =
   tb.write(xMargin, 1, styleBright, fgCyan, fileRecentIcon, "Recent Files", resetStyle)
   line = 3
   fileIndex = 1
-  setCurrentDir(getConfigDir() / "lina/")
+  setCurrentDir(getDataDir() / "lina/")
+  # setCurrentDir(getConfigDir() / "lina/")
   let history = readFile(historyFile)
-  setCurrentDir(getAppDir())
+  recentFiles.setLen(0)
   recentFiles = history.split('\n')
+  recentFiles = recentFiles.deduplicate
+  setCurrentDir(getAppDir())
   truncateRecentFiles()
   for file in recentFiles:
-    if not file.isEmptyOrWhitespace:
+    if not file.isEmptyOrWhitespace and fileExists(file):
       if fileIndex == selection:
         tb.write(xMargin, line, resetStyle, styleBright, fgGreen, "  ", $fileIndex, ". ", file.relativePath(config["scanDir"].expandTilde.expandFilename), resetStyle)
         current = file
@@ -452,16 +488,34 @@ proc displayFileInfo(f: (PathComponent, string)) : void =
     tb.write(4, 2 + 7, fgBlue, "    File ID: ", fgWhite, $info.id.file)  
     tb.write(4, 2 + 8, fgBlue, "  Device ID: ", fgWhite, $info.id.device)  
     tb.write(4, 2 + 9, fgBlue, " Hard Links: ", fgWhite, $info.linkCount)
-    var key = Key.None
-    while not @[Key.I, Key.Escape].contains(key):
-      tb.display()
-      sleep(20)
-      key = getKey()
-      if key == Key.Q: close()
   of pcDir, pcLinkToDir:
-    discard
-  
+    var count = 0
+    var size = 0
+    for file in walkDir(f[1].expandTilde.expandFilename):
+      size += getFilesize(file[1].expandTilde.expandFilename)
+      count += 1
+    tb.setBackgroundColor(bgNone)
+    tb.fill(0, 0, tb.width, tb.height, " ")
+    tb.write(2, 1, fgYellow, f[1])
+    if f[0] == pcDir:
+      tb.write(4, 2, fgCyan, f[0].formatKind, fgWhite, separator, fgGreen, f[1].relativePath(currentPath))
+    else:
+      tb.write(4, 2, fgMagenta, f[0].formatKind, fgWhite, separator, fgGreen, f[1].relativePath(currentPath), fgMagenta, symlinkArrow, fgCyan, styleUnderscore, f[1].expandSymlink, resetStyle)
+    tb.write(4, 2 + 1, fgBlue, "       Size: ", fgWhite, size.formatSize(includeSpace=true))
+    tb.write(4, 2 + 2, fgBlue, "Permissions: ", fgWhite, f[1].getFilePermissions.formatPermissions)
+    tb.write(4, 2 + 3, fgBlue, "      Items: ", fgWhite, $count)
+    tb.write(4, 2 + 4, fgBlue, "Last Access: ", fgWhite, f[1].getLastAccessTime.format("d MMM yyyy h:mm:ss tt"))
+    tb.write(4, 2 + 5, fgBlue, " Last Write: ", fgWhite, f[1].getLastModificationTime.format("d MMM yyyy h:mm:ss tt"))
+    tb.write(4, 2 + 6, fgBlue, "    Created: ", fgWhite, f[1].getCreationTime.format("d MMM yyyy h:mm:ss tt"))
+  var key = Key.None
+  while not @[Key.I, Key.Escape].contains(key):
+    tb.display()
+    sleep(20)
+    key = getKey()
+    if key == Key.Q: close()
+ 
 proc displayFileContents(f: (PathComponent, string)) : void =
+  todo("wordwrap", "OR screen scroll with line[x..tb.width]")
   case f[0]:
   of pcDir, pcLinkToDir:
     discard
@@ -557,10 +611,6 @@ proc writeFour(xPos : int, yPos : int) : void =
   tb.write(xPos, yPos + 0, fgCyan, "█  █ ") 
   tb.write(xPos, yPos + 1, fgCyan, "█▄▄█ ")
   tb.write(xPos, yPos + 2, fgCyan, "   █ ")
-# proc writeFour(xPos : int, yPos : int) : void =
-#   tb.write(xPos, yPos + 0, fgCyan, " ▄▀█ ") 
-#   tb.write(xPos, yPos + 1, fgCyan, "█▄▄█▄")
-#   tb.write(xPos, yPos + 2, fgCyan, "   █ ")
 
 proc writeFive(xPos : int, yPos : int) : void =
   tb.write(xPos, yPos + 0, fgCyan, "█▀▀▀ ")
@@ -602,6 +652,8 @@ proc displayTime : void =
   while key == Key.None:
     let currentTime = now().format("HHmm")
     tb.setForegroundColor(fgMagenta)
+    tb.setBackgroundColor(bgBlack)
+    tb.fill((tb.width / 2).toInt - 12, (tb.height / 2).toInt - 2, (tb.width / 2).toInt + 12, (tb.height / 2).toInt + 2, " ")
     tb.drawRect((tb.width / 2).toInt - 12, (tb.height / 2).toInt - 2, (tb.width / 2).toInt + 12, (tb.height / 2).toInt + 2, doubleStyle=true)
     case currentTime[0]:
     of '0': writeZero(digit0[0], digit0[1])
@@ -685,7 +737,7 @@ proc displaySplash : void =
   if config["splash"].parseBool:
     var ticks = 100
     tb.setForegroundColor(fgCyan)
-    tb.drawRect((tb.width / 2).toInt - 27, (tb.height / 2).toInt - 5, (tb.width / 2).toInt + 27, (tb.height / 2).toInt + 5)
+    tb.drawRect((tb.width / 2).toInt - 27, (tb.height / 2).toInt - 5, (tb.width / 2).toInt + 26, (tb.height / 2).toInt + 5)
     tb.write((tb.width / 2).toInt - 25, (tb.height / 2).toInt - 3, fgYellow, "     _", fgCyan, """/\/\""", fgYellow, "________", fgCyan, """/\/\""", fgYellow, "___________________________")
     tb.write((tb.width / 2).toInt - 25, (tb.height / 2).toInt - 2, fgYellow, "    _", fgCyan, """/\/\""", fgYellow, "________________", fgCyan, """/\/\/\/\""", fgYellow, "____", fgCyan, """/\/\/\""", fgYellow, "_____ ")
     tb.write((tb.width / 2).toInt - 25, (tb.height / 2).toInt - 1, fgYellow, "   _", fgCyan, """/\/\""", fgYellow, "________", fgCyan, """/\/\""", fgYellow, "____", fgCyan, """/\/\""", fgYellow, "__", fgCyan, """/\/\""", fgYellow, "______", fgCyan, """/\/\""", fgYellow, "___  ")
@@ -702,15 +754,49 @@ proc displaySplash : void =
         ticks -= 1
         sleep(20)
 
+proc confirm(message : string) : bool =
+  let
+    messageLines = message.wrap((tb.width/2).toInt)
+    popUpWidth = (tb.width/2).toInt + 4
+    puX1 = (tb.width/2).toInt - (popUpWidth/2).toInt
+    puX2 = (tb.width/2).toInt + (popUpWidth/2).toInt
+    puY1 = (tb.height/2).toInt - ((messageLines.len+5)/2).toInt
+    puY2 = (tb.height/2).toInt + ((messageLines.len+5)/2).toInt
+  var
+    i = 0
+  tb.setForegroundColor(fgRed)
+  tb.setBackgroundColor(bgBlack)
+  tb.fill(puX1, puY1, puX2, puY2, " ")
+  tb.drawRect(puX1, puY1, puX2, puY2, doubleStyle=true)
+  tb.setForegroundColor(fgYellow)
+  while i < messageLines.len:
+    tb.write(puX1+2, puY1+2 + i, messageLines[i].center((tb.width/2).toInt))
+    i += 1
+  tb.write((tb.width/2).toInt-7, puY1+2 + i+1, fgRed, styleBright, "[Y]es")
+  tb.write((tb.width/2).toInt+4, puY1+2 + i+1, fgGreen, styleBright, "[N]o", resetStyle)
+  tb.display()
+  var key = Key.None
+  while key == Key.None:
+    key = getKey()
+    case key:
+    of Key.Y:
+      return true
+    of Key.N, Key.Escape:
+      return false
+    else:
+      discard
+    sleep(20)
+
 proc main(filename : string) : void =
   var timer = 0
   while true:
     tb.clear()
     var key = getKey()
     if config["clock"].parseBool:
-      if key == Key.None:
-        timer += 1
-      else: timer = 0
+      if currentState in @[FILE_SELECT, FILE_EXPLORE, FILE_RECENT]:
+        if key == Key.None:
+          timer += 1
+        else: timer = 0
     case currentState:
     of FILE_SELECT:
       fileSelect()
@@ -755,9 +841,11 @@ proc main(filename : string) : void =
       of Key.E:
         currentState = FILE_EXPLORE
         currentPath = config["scanDir"].expandTilde.expandFilename
+        itemSelection = 1
       of Key.C: displayCalendar()
       of Key.ShiftC: displayTime()
-      of Key.Escape, Key.Q: close()
+      of Key.Escape: discard
+      of Key.Q: close()
       else:
         discard
     of FILE_RECENT:
@@ -793,12 +881,13 @@ proc main(filename : string) : void =
       of Key.E:
         currentState = FILE_EXPLORE
         currentPath = config["scanDir"].expandTilde.expandFilename
-      of Key.Escape, Key.Q: close()
+        itemSelection = 1
+      of Key.Escape: discard
+      of Key.Q: close()
       else:
         discard
     of FILE_VIEW:
       fileView(current)
-      todo("config[\"showDone\"] = true", "false: skip files with no tasks")
       case key
       of Key.None: discard
       of Key.CtrlR:
@@ -823,14 +912,14 @@ proc main(filename : string) : void =
         else:
           selection -= 1
           issueSelection = 1
-        current = config["scanDir"].expandTilde.expandFilename / files[selection-1]
+        current = files[selection-1]
       of Key.Right, Key.L:
         if selection == files.len:
           selection = 1
         else:
           selection += 1
         issueSelection = 1
-        current = config["scanDir"].expandTilde.expandFilename / files[selection-1]
+        current = files[selection-1]
       of Key.Enter, Key.Space:
         enterFileAndReturn()
         updateHistory()
@@ -851,6 +940,7 @@ proc main(filename : string) : void =
       of Key.E:
         currentState = FILE_EXPLORE
         currentPath = config["scanDir"].expandTilde.expandFilename
+        itemSelection = 1
       of Key.Escape:
         case config["default"]:
         of "select":
@@ -890,7 +980,7 @@ proc main(filename : string) : void =
           currentPath = currentPath.parentDir
           itemSelection = 1
           currentDirPaths.setLen(0)
-      of Key.Right, Key.L:
+      of Key.Right, Key.L, Key.Enter:
         if currentDirPaths.len > 0:
           case currentDirPaths[itemSelection - 1][0]:
           of pcDir, pcLinkToDir:
@@ -902,6 +992,7 @@ proc main(filename : string) : void =
             for extension in config["extensions"].split(","):
               if currentDirPaths[itemSelection - 1][1].endsWith(extension):
                 enterFileAndReturn()
+                current = currentDirPaths[itemSelection - 1][1]
                 updateHistory()
                 initProgram()
                 currentState = FILE_EXPLORE
@@ -921,32 +1012,33 @@ proc main(filename : string) : void =
         else:
           selectedItems.add(currentDirPaths[itemSelection - 1])
       of Key.D:
-        for item in selectedItems:
-          case item[0]:
-          of pcLinkToFile:
-            removeFile(item[1])
-          of pcFile, pcDir, pcLinkToDir:
-            discard
-        for item in selectedItems:
-          case item[0]:
-          of pcFile:
-            removeFile(item[1].expandTilde.expandFilename)
-          of pcLinkToFile, pcDir, pcLinkToDir:
-            discard
-        for item in selectedItems:
-          case item[0]:
-          of pcLinkToDir:
-            removeFile(item[1])
-          of pcDir, pcFile, pcLinkToFile:
-            discard
-        for item in selectedItems:
-          case item[0]:
-          of pcDir:
-            removeDir(item[1].expandTilde.expandFilename)
-          of pcLinkToDir, pcFile, pcLinkToFile:
-            discard
-        selectedItems.setLen(0)
-        itemSelection = 1
+        if confirm("Really delete " & $(selectedItems.len) & " items?"):
+          for item in selectedItems:
+            case item[0]:
+            of pcLinkToFile:
+              removeFile(item[1])
+            of pcFile, pcDir, pcLinkToDir:
+              discard
+          for item in selectedItems:
+            case item[0]:
+            of pcFile:
+              removeFile(item[1].expandTilde.expandFilename)
+            of pcLinkToFile, pcDir, pcLinkToDir:
+              discard
+          for item in selectedItems:
+            case item[0]:
+            of pcLinkToDir:
+              removeFile(item[1])
+            of pcDir, pcFile, pcLinkToFile:
+              discard
+          for item in selectedItems:
+            case item[0]:
+            of pcDir:
+              removeDir(item[1].expandTilde.expandFilename)
+            of pcLinkToDir, pcFile, pcLinkToFile:
+              discard
+          selectedItems.setLen(0)
+          itemSelection = 1
       of Key.Y:
         for item in selectedItems:
           if not (item in copiedItems):
@@ -994,7 +1086,7 @@ proc main(filename : string) : void =
         # 	of pcDir, pcLinkToDir:
         # 		# pass input to moveDir
         # selectedItems.setLen(0)
-      of Key.Enter:
+      of Key.Tab:
         enterShellAndReturn()
         initProgram()
         currentState = FILE_EXPLORE
@@ -1008,6 +1100,7 @@ proc main(filename : string) : void =
           selectedItems.setLen(0)
         else:
           currentState = FILE_RECENT
+          selection = 1
           setCurrentDir(getAppDir())
       of Key.Q: close()
       else:
@@ -1033,7 +1126,8 @@ proc main(filename : string) : void =
         updateHistory()
         initProgram()
         currentState = DIRECT_VIEW
-      of Key.Q, Key.Escape: close()
+      of Key.Escape: discard
+      of Key.Q: close()
       else:
         discard
     tb.display()
